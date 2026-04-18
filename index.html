@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard | Status Checker</title>
+    <style>
+        body {
+            background-color: #050505;
+            color: #00ff00;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            background: rgba(0, 255, 0, 0.03);
+            border: 1px solid #00ff00;
+            border-radius: 16px;
+            padding: 25px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.15);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        h2 {
+            text-align: center;
+            text-transform: uppercase;
+            text-shadow: 0 0 10px #00ff00;
+            margin-top: 0;
+            font-size: 1.5rem;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0 20px 0;
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(0, 255, 0, 0.5);
+            color: #00ff00;
+            border-radius: 8px;
+            box-sizing: border-box;
+            font-size: 1rem;
+            outline: none;
+            transition: 0.3s;
+        }
+        input:focus {
+            border-color: #00ff00;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+        }
+        input::placeholder {
+            color: rgba(0, 255, 0, 0.4);
+        }
+        button {
+            width: 100%;
+            padding: 14px;
+            background: transparent;
+            border: 2px solid #00ff00;
+            color: #00ff00;
+            font-size: 1.1rem;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        button:hover {
+            background: #00ff00;
+            color: #000;
+            box-shadow: 0 0 20px #00ff00;
+        }
+        #result {
+            margin-top: 20px;
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+        .status-box {
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            background: rgba(0, 255, 0, 0.08);
+            border-left: 4px solid #00ff00;
+            word-wrap: break-word;
+        }
+        .error-box {
+            background: rgba(255, 0, 0, 0.1);
+            border-left: 4px solid #ff0000;
+            color: #ff4444;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>System Scan</h2>
+    <label for="accessToken">🔑 Access Token</label>
+    <input type="password" id="accessToken" placeholder="วาง Token ที่นี่...">
+    
+    <label for="adAccountId">📊 Ad Account ID (ใส่หรือไม่ใส่ก็ได้)</label>
+    <input type="text" id="adAccountId" placeholder="เช่น act_123456789">
+    
+    <button onclick="checkStatus()" id="scanBtn">Initiate Scan</button>
+    
+    <div id="result"></div>
+</div>
+
+<script>
+    async function checkStatus() {
+        const token = document.getElementById('accessToken').value.trim();
+        const adAccount = document.getElementById('adAccountId').value.trim();
+        const resultDiv = document.getElementById('result');
+        const btn = document.getElementById('scanBtn');
+
+        if (!token) {
+            resultDiv.innerHTML = `<div class="status-box error-box">⚠️ กรุณาใส่ Access Token ก่อนครับ</div>`;
+            return;
+        }
+
+        btn.innerText = "Scanning...";
+        btn.style.opacity = "0.5";
+        resultDiv.innerHTML = "";
+
+        try {
+            // 1. เช็คสถานะ Token
+            const meRes = await fetch(`https://graph.facebook.com/v19.0/me?access_token=${token}`);
+            const meData = await meRes.json();
+
+            if (meData.error) {
+                resultDiv.innerHTML = `
+                    <div class="status-box error-box">
+                        ❌ <b>พบปัญหา:</b> โทเค็นหมดอายุ หรือบัญชีติด Checkpoint<br>
+                        <i>รายละเอียด: ${meData.error.message}</i>
+                    </div>`;
+                resetBtn();
+                return;
+            }
+
+            let outputHtml = `<div class="status-box">✅ <b>บัญชีปกติ (Active):</b> ${meData.name}</div>`;
+
+            // 2. เช็คสถานะ Ad Account (ถ้ามีการกรอก)
+            if (adAccount) {
+                const adRes = await fetch(`https://graph.facebook.com/v19.0/${adAccount}?fields=account_status,disable_reason&access_token=${token}`);
+                const adData = await adRes.json();
+
+                if (adData.error) {
+                    outputHtml += `
+                        <div class="status-box error-box">
+                            ❌ <b>ดึงข้อมูลโฆษณาไม่ได้:</b><br>
+                            <i>${adData.error.message}</i>
+                        </div>`;
+                } else {
+                    const statusMap = {
+                        1: "🟢 ปกติ (Active)",
+                        2: "🔴 โดนปิดการใช้งาน (Disabled - ติดแดง)",
+                        3: "🟡 มียอดค้างชำระ (Unsettled)",
+                        7: "🟠 กำลังตรวจสอบความเสี่ยง (Pending Risk Review)",
+                        101: "⚫ ปิดถาวร (Closed)"
+                    };
+                    const statusCode = adData.account_status;
+                    const statusText = statusMap[statusCode] || `ไม่ทราบสถานะ (${statusCode})`;
+
+                    outputHtml += `<div class="status-box">📊 <b>สถานะบัญชีโฆษณา:</b> ${statusText}</div>`;
+
+                    if (statusCode === 2) {
+                        const reason = adData.disable_reason || 'ไม่ระบุสาเหตุ';
+                        outputHtml += `<div class="status-box error-box" style="margin-top: 10px;">⚠️ <b>รหัสสาเหตุ (Disable Reason):</b> ${reason}</div>`;
+                    }
+                }
+            }
+
+            resultDiv.innerHTML = outputHtml;
+
+        } catch (error) {
+            resultDiv.innerHTML = `<div class="status-box error-box">❌ เกิดข้อผิดพลาดในการเชื่อมต่ออินเทอร์เน็ต</div>`;
+        }
+
+        resetBtn();
+
+        function resetBtn() {
+            btn.innerText = "Initiate Scan";
+            btn.style.opacity = "1";
+        }
+    }
+</script>
+
+</body>
+</html>
